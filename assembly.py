@@ -2,7 +2,7 @@ import re
 from logger import *
 
 
-
+# globals
 # states
 RUN = 'run'
 READ = 'read'
@@ -51,11 +51,15 @@ def reverse(direction):
     raise Exception('unknown direction: {}'.format(direction))
 
 
+def is_number(text):
+    return re.match('-?\d+', text) is not None
+
+
 class AssemblyChip:
     # ops = 'add sub neg mov swp sav jro jmp jez jnz jgz jlz'.split()
     global_pc = 0
 
-    def __init__(self):
+    def __init__(self, program=None):
         # current program counter, relative to list of instructions
         self.pc = 0
         # current state of this chip, which can be RUN, READ, WRITE
@@ -73,6 +77,8 @@ class AssemblyChip:
         self.right = None
         self.down = None
         self.left = None
+        if program:
+            self.parse(program)
 
     def parse(self, program):
         # TODO enforce 15 as max number of instructions
@@ -80,6 +86,7 @@ class AssemblyChip:
         self.instructions = []
         for line in program.splitlines():
             # remove comments
+            # TODO: keep comments, but skip in pcinc() method
             i = line.find('#')
             if i >= 0:
                 line = line[:i]
@@ -166,6 +173,10 @@ class AssemblyChip:
             # while a write just needs a read on the other side to work
             other.try_read()
 
+    def run_many(self, num):
+        for i in range(num):
+            self.run()
+
     def run(self):
         if self.state == READ:
             # try to fulfill the read
@@ -189,12 +200,25 @@ class AssemblyChip:
                 src = parts.pop(0)
                 dst = parts.pop(0)
 
-                if src == ACC:
-                    # moving from acc, so this is a write
+                if is_number(src) and dst == NIL:
+                    # basically a nop
+                    # MOV 17, NIL
+                    pass
+                elif is_number(src) and dst == ACC:
+                    # move constant into acc
+                    # MOV 55, ACC
+                    self.set_acc(int(src))
+                elif is_number(src) and dst in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
+                    # WRITE: move a constant to a port
+                    # MOV 17, LEFT
+                    # MOV 5, ANY
+                    self.write_state(dst, int(src))
+                elif src == ACC:
+                    # WRITE: move acc to a port
                     # MOV ACC, LEFT
-                    # TODO:
-                    # MOV ACC, NIL
                     # MOV ACC, ACC
+                    # TODO: moving to NIL is a nop
+                    # MOV ACC, NIL
                     self.write_state(dst, self.acc)
                 elif src in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     if dst == ACC:
@@ -204,25 +228,31 @@ class AssemblyChip:
                         # MOV RIGHT, DOWN
                         # MOV DOWN, ANY
                         self.read_state(src, dst)
+                else:
+                    raise Exception('illegal instruction: "{}"'.format(instruction))
             elif opcode == ADD:
                 val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     # read from one of our ports and add to acc register
                     debug('instruction "{}" adding from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_ADD)
-                else:
+                elif is_number(val):
                     val = int(val)
                     debug('add instruction, val is {}'.format(val))
                     self.add(val)
+                else:
+                    raise Exception('illegal instruction: "{}"'.format(instruction))
             elif opcode == SUB:
                 val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     debug('instruction "{}" subtracting from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_SUB)
-                else:
+                elif is_number(val):
                     val = int(val)
                     debug('sub instruction, val is {}'.format(val))
                     self.sub(val)
+                else:
+                    raise Exception('illegal instruction: "{}"'.format(instruction))
             elif opcode == NEG:
                 self.acc = -self.acc
             elif opcode == SAV:
@@ -261,16 +291,21 @@ class AssemblyChip:
             elif opcode == JRO:
                 offset = int(parts.pop(0))
                 # HACK: we will increment PC after the if block
+                # TODO: handle wrap-around
                 self.pc += offset - 1
             else:
-                raise Exception('unknown opcode {} at line {}'.format(opcode, self.pc))
-            # increment program counter, if we are in the run state
-            if self.state == RUN:
+                raise Exception('unknown opcode at line {} for instruction "{}'.format(self.pc, instruction))
+            # increment program counter so long as:
+            # we are in the RUN state
+            # we did not just execute a jump instruction
+            if self.state == RUN and opcode not in [JMP, JNZ, JEZ, JGZ, JLZ, JRO]:
                 self.pcinc()
 
     def pcinc(self):
         self.pc += 1
         self.pc %= len(self.instructions)
+        # TODO: while not_empty(self.instruction[self.pc])
+        # in order to skip over comments and blank lines in the code
         while self.instructions[self.pc].strip() == '':
             self.pc += 1
             self.pc %= len(self.instructions)
@@ -328,31 +363,32 @@ class AssemblyChip:
         return '\n'.join(res)
 
 
-chip1 = AssemblyChip()
-chip1.parse('''add 1
-mov acc, right
-add right, acc
-''')
+if __name__ == '__main__':
+    chip1 = AssemblyChip()
+    chip1.parse('''add 1
+    mov acc, right
+    add right, acc
+    ''')
 
-chip2 = AssemblyChip()
-chip2.parse('''add left, acc
-move acc, right
-''')
+    chip2 = AssemblyChip()
+    chip2.parse('''add left, acc
+    move acc, right
+    ''')
 
-chip1.right = chip2
-chip2.left = chip1
+    chip1.right = chip2
+    chip2.left = chip1
 
-while True:
-    print()
-    print(chip1)
-    print('-' * 25)
-    print(chip2)
-    print('-' * 25)
-    val = input('enter to continue, q+enter to exit')
-    if val == 'q':
-        break
-    chip1.run()
-    chip2.run()
-    AssemblyChip.global_pc += 1
+    while True:
+        print()
+        print(chip1)
+        print('-' * 25)
+        print(chip2)
+        print('-' * 25)
+        val = input('enter to continue, q+enter to exit')
+        if val == 'q':
+            break
+        chip1.run()
+        chip2.run()
+        AssemblyChip.global_pc += 1
 
 # done
