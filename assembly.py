@@ -1,4 +1,7 @@
 import re
+from logger import *
+
+
 
 # states
 RUN = 'run'
@@ -49,7 +52,7 @@ def reverse(direction):
 
 
 class AssemblyChip:
-    ops = 'add sub neg mov swp sav jro jmp jez jnz jgz jlz'.split()
+    # ops = 'add sub neg mov swp sav jro jmp jez jnz jgz jlz'.split()
     global_pc = 0
 
     def __init__(self):
@@ -62,7 +65,7 @@ class AssemblyChip:
         # register values
         self.acc = 0
         self.bak = 0
-        # TODO: limit number of instructions
+        # TODO: limit number of instructions to 15
         self.instructions = []
         self.labels = {}
         # neighboring chips
@@ -86,11 +89,6 @@ class AssemblyChip:
                 label = label.strip()
                 self.labels[label] = len(self.instructions)
             line = line.strip()
-            # wtf does this do?
-
-            #if line:
-            #    line = re.split('[^ ,]+', line)
-            # print(line)
             self.instructions.append(line)
 
     def check_label(self, label):
@@ -111,7 +109,7 @@ class AssemblyChip:
     def write_state(self, direction, value):
         # change our state
         self.state = WRITE
-        self.buffer(AssemblyChip.global_pc, direction, value)
+        self.buffer = (AssemblyChip.global_pc, direction, value)
 
     def read_state(self, direction, destination):
         # go into a read state
@@ -119,6 +117,7 @@ class AssemblyChip:
         self.buffer = (AssemblyChip.global_pc, direction, destination)
 
     def run_state(self):
+        # go into run state, clear the read/write buffer
         self.state = RUN
         self.buffer = None
 
@@ -177,43 +176,52 @@ class AssemblyChip:
         elif self.state == RUN:
             if not self.instructions:
                 return
-            # wrap around self.pc, if necessary
-            self.pc %= len(self.instructions)
-            while self.instructions[self.pc].strip() == '':
-                self.pcinc()
-            instruction = self.instructions[self.pc]
+            instruction = self.instructions[self.pc].replace(',', '')
             parts = instruction.split()
             opcode = parts.pop(0)
+            debug('opcode is {}'.format(opcode))
             # TODO: assert rest of line is empty after we've processed an instruction
+            # maybe split into jumps and not jumps?
             if opcode == NOP or (opcode == ADD and parts[0] == NIL):
                 # two kinds of nop
                 pass
             elif opcode == MOV:
                 src = parts.pop(0)
-                # remove comma
-                parts.pop(0)
                 dst = parts.pop(0)
+
                 if src == ACC:
+                    # moving from acc, so this is a write
+                    # MOV ACC, LEFT
+                    # TODO:
+                    # MOV ACC, NIL
+                    # MOV ACC, ACC
                     self.write_state(dst, self.acc)
-                elif src in [LEFT, UP, RIGHT, DOWN]:
+                elif src in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     if dst == ACC:
                         self.read_state(src, ACC_MOV)
                     else:
+                        # MOV LEFT, RIGHT
+                        # MOV RIGHT, DOWN
+                        # MOV DOWN, ANY
                         self.read_state(src, dst)
             elif opcode == ADD:
-                val = parts.pop(0).replace(',','')
+                val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
-                    # read from one of our ports
+                    # read from one of our ports and add to acc register
+                    debug('instruction "{}" adding from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_ADD)
                 else:
                     val = int(val)
+                    debug('add instruction, val is {}'.format(val))
                     self.add(val)
             elif opcode == SUB:
                 val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
+                    debug('instruction "{}" subtracting from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_SUB)
                 else:
                     val = int(val)
+                    debug('sub instruction, val is {}'.format(val))
                     self.sub(val)
             elif opcode == NEG:
                 self.acc = -self.acc
@@ -258,11 +266,14 @@ class AssemblyChip:
                 raise Exception('unknown opcode {} at line {}'.format(opcode, self.pc))
             # increment program counter, if we are in the run state
             if self.state == RUN:
-                self.pc += 1
+                self.pcinc()
 
     def pcinc(self):
         self.pc += 1
         self.pc %= len(self.instructions)
+        while self.instructions[self.pc].strip() == '':
+            self.pc += 1
+            self.pc %= len(self.instructions)
 
     def bounds_check(self):
         if self.acc > 999:
@@ -282,15 +293,19 @@ class AssemblyChip:
         self.bounds_check()
 
     def str_instructions(self):
-        def quad(title, value, location, index):
-            location[index] += title.ljust(4) + '|'
-            location[index+1] += str(value).ljust(4) + '|'
-            location[index+2] += '-' * 5
-        res = [''.ljust(19)+'|'] * 15
-        for index, instruction in enumerate(self.instructions):
-            #print(index)
-            #print(instruction)
-            res[index] = instruction.ljust(19) + '|'
+        width = 20
+        res = [''.ljust(width)+'|'] * 15
+        for idx, instruction in enumerate(self.instructions):
+            if idx == self.pc:
+                res[idx] = ('*'+instruction).ljust(width) + '|'
+            else:
+                res[idx] = instruction.ljust(width) + '|'
+
+        def quad(title, value, location, idx):
+            location[idx] += title.ljust(4) + '|'
+            location[idx + 1] += str(value).ljust(4) + '|'
+            location[idx + 2] += '-' * 5
+
         # acc
         quad('ACC', str(self.acc), res, 0)
         # bak
@@ -328,11 +343,12 @@ chip1.right = chip2
 chip2.left = chip1
 
 while True:
+    print()
     print(chip1)
-    print('-'*25)
+    print('-' * 25)
     print(chip2)
     print('-' * 25)
-    val = input('enter/return to continue, q to exit')
+    val = input('enter to continue, q+enter to exit')
     if val == 'q':
         break
     chip1.run()
