@@ -8,6 +8,13 @@ TODO:
 * move constant values to a port / receive constants from port to acc
 '''
 
+DEBUG = False
+
+
+def debug(msg):
+    if DEBUG:
+        print(msg)
+
 
 def parse(program):
     # remove extra whitespaces
@@ -120,6 +127,50 @@ class SimpleTestCase(unittest.TestCase):
         chip1.run()
         chip2.run()
 
+        self.assertTrue(chip1.state == WRITE, '\n'+str(chip1))
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip2.state == READ, '\n'+str(chip2))
+        self.assertTrue(chip2.pc == 0)
+
+        global_inc()
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        chip1.run()
+        chip2.run()
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        print('chip1.pc = {}'.format(chip1.pc))
+        print('chip2.pc = {}'.format(chip2.pc))
+
+        assert chip1.state == RUN, '\n' + str(chip1)
+        assert chip1.pc == 1
+        assert chip2.state == RUN, '\n' + str(chip2)
+        assert chip2.pc == 1
+        assert chip2.acc == 12
+
+    def testReadWriteTwice(self):
+        # TODO pick up here with this method
+        chip1 = AssemblyChip(parse('''
+        mov 12, right
+        add right
+        '''))
+        chip2 = AssemblyChip(parse('''
+        mov left, acc
+        mov acc, left
+        '''))
+        chip1.right = chip2
+        chip2.left = chip1
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        chip1.run()
+        chip2.run()
+
         assert chip1.state == WRITE, '\n'+str(chip1)
         assert chip1.pc == 0
         assert chip2.state == READ, '\n'+str(chip2)
@@ -131,7 +182,7 @@ class SimpleTestCase(unittest.TestCase):
         print('\n' + str(chip2))
 
         chip1.run()
-        #chip2.run()
+        chip2.run()
 
         print('\n' + str(chip1))
         print('\n' + str(chip2))
@@ -139,13 +190,11 @@ class SimpleTestCase(unittest.TestCase):
         print('chip1.pc = {}'.format(chip1.pc))
         print('chip2.pc = {}'.format(chip2.pc))
 
-        '''
         assert chip1.state == RUN, '\n' + str(chip1)
         assert chip1.pc == 1
         assert chip2.state == RUN, '\n' + str(chip2)
         assert chip2.pc == 1
         assert chip2.acc == 12
-        '''
 
 '''
 Cases to consider:

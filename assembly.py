@@ -73,6 +73,8 @@ class AssemblyChip:
         else:
             self.name = name
         AssemblyChip.chip_num += 1
+        # current cycle
+        self.cycle = 0
         # current program counter, relative to list of instructions
         self.pc = 0
         # current state of this chip, which can be RUN, READ, WRITE
@@ -129,24 +131,33 @@ class AssemblyChip:
 
     def write_state(self, direction, value):
         # change our state
+        # TODO assert direction is valid
         self.state = WRITE
         self.buffer = (AssemblyChip.global_pc, direction, value)
 
     def read_state(self, direction, destination):
         # go into a read state
+        # TODO assert direction is valid
         self.state = READ
         self.buffer = (AssemblyChip.global_pc, direction, destination)
 
     def run_state(self):
-        # go into run state, clear the read/write buffer
+        # go into RUN state, clear the read/write buffer
         self.state = RUN
+        self.buffer = None
+
+    def pass_state(self):
+        # Go into PASS state and clear read/write buffer,
+        # so that the call to run() this cycle will put us back into RUN state
+        # for the next cycle.
+        self.state = PASS
         self.buffer = None
 
     def try_read(self):
         assert(self.state == READ)
         # try to fulfill a read request
         # will either be successful, or not
-        (cycle, direction, destination) = self.buffer
+        (read_cycle, direction, destination) = self.buffer
         # TODO if direction is "any" loop through
         other = self.get_neighbor(direction)
 
@@ -163,7 +174,19 @@ class AssemblyChip:
             # of if both the read and the write are the same cycle, but it is an earlier cycle
             # TODO will any nonzero difference in the read/write cycles actually work?
             if direction == reverse(other_direction) and \
-                    (cycle < other_cycle or cycle == other_cycle and cycle < AssemblyChip.global_pc):
+                    (read_cycle < other_cycle or read_cycle == other_cycle and read_cycle < AssemblyChip.global_pc):
+
+                # fulfill the write for the other chip!
+                if other.cycle < self.cycle:
+                    # The other chip has not yet called its run() method
+                    # so we put it into a PASS state. Its run() method
+                    # will move it into the RUN state.
+                    other.pass_state()
+                else:
+                    # the other chip has already called its run method,
+                    # so we put it into a RUN state for the next cycle.
+                    other.run_state()
+                    other.pcinc()
 
                 # CASCADE
                 # if the destination of our read is a port leading to another chip
@@ -185,35 +208,40 @@ class AssemblyChip:
                 elif destination == NIL:
                     pass
                 # We fulfilled the read we were working on, yay!
+
                 return True
         return False
 
-    def try_write(self):
-        assert(self.state == WRITE)
-        (cycle, direction, value) = self.buffer
-        other = self.get_neighbor(direction)
-
-        debug('{} try_write cycle={} direction={} value={}'.format(self.name, cycle, direction, value))
-        debug('{} other.buffer {} = {}'.format(self.name, other.state, other.buffer))
-
-        if other.state == READ:
-            # try to fulfill the read from the other side
-            # this is because reads can cascade, while writes cannot
-            # i.e. the destination of a read could be acc, or a port
-            # while a write just needs a read on the other side to work
-            return other.try_read()
-        # not able to fulfill a write yet
-        return False
+    # def try_write(self):
+    #     assert(self.state == WRITE)
+    #     (cycle, direction, value) = self.buffer
+    #     other = self.get_neighbor(direction)
+    #
+    #     debug('{} try_write cycle={} direction={} value={}'.format(self.name, cycle, direction, value))
+    #     debug('{} other.buffer {} = {}'.format(self.name, other.state, other.buffer))
+    #
+    #     if other.state == READ:
+    #         # try to fulfill the read from the other side
+    #         # this is because reads can cascade, while writes cannot
+    #         # i.e. the destination of a read could be acc, or a port
+    #         # while a write just needs a read on the other side to work
+    #         return other.try_read()
+    #     # not able to fulfill a write yet
+    #     return False
 
     def run_many(self, num):
         for i in range(num):
             self.run()
 
     def run(self):
+        self.cycle += 1
         if self.state == PASS:
-            pass
+            # A neighboring chip processed a write during its cycle,
+            # so go to RUN state for the next cycle
+            self.pcinc()
+            self.run_state()
         elif self.state == READ:
-            # try to fulfill the read
+            # try to fulfill the read, which will fulfill the write as necessary
             debug('{} trying to fulfill a read'.format(self.name))
             result = self.try_read()
             if result:
@@ -224,16 +252,19 @@ class AssemblyChip:
             else:
                 debug('{} unable to fulfill read'.format(self.name))
         elif self.state == WRITE:
+            # writes are skipped. All writes are fulfilled by reads.
+            pass
+
             # try to fulfill a write
-            debug('{} trying to fulfill a write'.format(self.name))
-            result = self.try_write()
-            if result:
-                # TODO should pcinc() be part of run_state() method?
-                debug('{} fulfilled write'.format(self.name))
-                self.run_state()
-                self.pcinc()
-            else:
-                debug('{} unable to fulfill write'.format(self.name))
+            # debug('{} trying to fulfill a write'.format(self.name))
+            # result = self.try_write()
+            # if result:
+            #     # TODO should pcinc() be part of run_state() method?
+            #     debug('{} fulfilled write'.format(self.name))
+            #     self.run_state()
+            #     self.pcinc()
+            # else:
+            #     debug('{} unable to fulfill write'.format(self.name))
 
         elif self.state == RUN:
             if not self.instructions:
@@ -353,7 +384,7 @@ class AssemblyChip:
                 self.pcinc()
 
     def pcinc(self):
-        debug('{} incrementing from {}'.format(self.name, self.pc))
+        debug('incrementing pc for {} to {}'.format(self.name, self.pc))
         self.pc += 1
         self.pc %= len(self.instructions)
         # TODO: while not_empty(self.instruction[self.pc])
@@ -398,11 +429,11 @@ class AssemblyChip:
         quad('ACC', str(self.acc), res, 0)
         # bak
         quad('BAK', str(self.bak), res, 3)
-        # last
+        # TODO last
         quad('LAST', 'todo', res, 6)
         # mode
         quad('MODE', self.state, res, 9)
-        # idle
+        # TODO idle
         quad('IDLE', 'todo', res, 12)
         return res
 
