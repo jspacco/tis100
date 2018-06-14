@@ -1,5 +1,12 @@
 import unittest
-from assembly import AssemblyChip
+from assembly import AssemblyChip, READ, WRITE, RUN, global_inc
+
+'''
+TODO:
+* jump instructions
+* bounds checks for add/subtract/move with acc
+* move constant values to a port / receive constants from port to acc
+'''
 
 
 def parse(program):
@@ -94,7 +101,82 @@ class SimpleTestCase(unittest.TestCase):
         assert chip.bak == 0
         assert chip.pc == 1
 
+    def testWriteNumReadNumAcc(self):
+        # TODO pick up here with this method
+        chip1 = AssemblyChip(parse('''
+        mov 12, right
+        nop
+        '''))
+        chip2 = AssemblyChip(parse('''
+        mov left, acc
+        nop
+        '''))
+        chip1.right = chip2
+        chip2.left = chip1
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        chip1.run()
+        chip2.run()
+
+        assert chip1.state == WRITE, '\n'+str(chip1)
+        assert chip1.pc == 0
+        assert chip2.state == READ, '\n'+str(chip2)
+        assert chip2.pc == 0
+
+        global_inc()
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        chip1.run()
+        #chip2.run()
+
+        print('\n' + str(chip1))
+        print('\n' + str(chip2))
+
+        print('chip1.pc = {}'.format(chip1.pc))
+        print('chip2.pc = {}'.format(chip2.pc))
+
+        '''
+        assert chip1.state == RUN, '\n' + str(chip1)
+        assert chip1.pc == 1
+        assert chip2.state == RUN, '\n' + str(chip2)
+        assert chip2.pc == 1
+        assert chip2.acc == 12
+        '''
+
+'''
+Cases to consider:
+* chip1 writes to chip2, chip1.run() < chip2.run()
+    - chip1 triggers a read for chip2
+    - what state should we put chip2 into? what happens when chip2.run() gets called?
+        > suppose it's RUN; what do we do?
+        > suppose it's PASS; what do we do?
+* chip1 writes to chip2, chip1.run() > chip2.run()
+    - chip2.run() reads, and finishes the read; what state do we put chip1 into?
+    - OK
+* chip1 reads from chip2, chip1.run() < chip2.run()
+* chip1 reads from chip2, chip1.run() > chip2.run()
+'''
+
+def run_all():
+    unittest.main()
+
+
+def run_some():
+    #@unittest.skipUnless(name == 'testWriteNumReadNumAcc')
+    #unittest.test_chip.SimpleTestCase.testWriteNumReadNumAcc()
+    #pass
+
+    #tests = unittest.TestLoader().loadTestsFromName('tests.' + 'testWriteNumReadNumAcc')
+    #unittest.TextTestRunner(verbosity=2).run(tests)
+    t = SimpleTestCase()
+    t.testWriteNumReadNumAcc()
+
+
 if __name__ == '__main__':
     # run all tests
-    unittest.main()
+    run_some()
 

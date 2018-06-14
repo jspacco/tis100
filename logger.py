@@ -12,7 +12,7 @@ LEVELS = {TRACE: 0,
           ERROR: 4,
           FATAL: 5}
 
-LEVEL = TRACE
+LEVEL = DEBUG
 
 
 def log(msg, level):

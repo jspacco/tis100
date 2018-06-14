@@ -7,6 +7,7 @@ from logger import *
 RUN = 'run'
 READ = 'read'
 WRITE = 'wrte'
+PASS = 'pass'
 
 # directions / destinations
 UP = 'up'
@@ -55,11 +56,23 @@ def is_number(text):
     return re.match('-?\d+', text) is not None
 
 
+def global_inc():
+    AssemblyChip.global_pc += 1
+
+
 class AssemblyChip:
     # ops = 'add sub neg mov swp sav jro jmp jez jnz jgz jlz'.split()
     global_pc = 0
+    chip_num = 1
 
-    def __init__(self, program=None):
+    def __init__(self, program=None, name=None):
+        # TODO track the number of instructions executed in order to track idle percentage
+        # name of this chip
+        if name is None:
+            self.name = 'chip{}'.format(AssemblyChip.chip_num)
+        else:
+            self.name = name
+        AssemblyChip.chip_num += 1
         # current program counter, relative to list of instructions
         self.pc = 0
         # current state of this chip, which can be RUN, READ, WRITE
@@ -69,7 +82,7 @@ class AssemblyChip:
         # register values
         self.acc = 0
         self.bak = 0
-        # TODO: limit number of instructions to 15
+        # list of instructions (limited to 15)
         self.instructions = []
         self.labels = {}
         # neighboring chips
@@ -85,6 +98,7 @@ class AssemblyChip:
         program = program.lower()
         self.instructions = []
         for line in program.splitlines():
+            # TODO limit instructions to 20 chars in length
             # remove comments
             # TODO: keep comments, but skip in pcinc() method
             i = line.find('#')
@@ -135,21 +149,31 @@ class AssemblyChip:
         (cycle, direction, destination) = self.buffer
         # TODO if direction is "any" loop through
         other = self.get_neighbor(direction)
+
+        debug('{} read from {}'.format(self.name, direction))
+        debug('{} other.buffer name = {}, state = {}, buffer = {}'.format(self.name, other.name, other.state, other.buffer))
+
         # check that the other chip did a write
         if other.state == WRITE:
+
+            debug('{} reading from {}'.format(self.name, other.name))
+
             (other_cycle, other_direction, value) = other.buffer
             # can fulfill if other chip write in our direction at least one cycle ago
-            if cycle < other_cycle and direction == reverse(other_direction):
-                # we have fulfilled the write coming from other!
-                # put other back into a run state for the next cycle
-                other.run_state()
+            # of if both the read and the write are the same cycle, but it is an earlier cycle
+            # TODO will any nonzero difference in the read/write cycles actually work?
+            if direction == reverse(other_direction) and \
+                    (cycle < other_cycle or cycle == other_cycle and cycle < AssemblyChip.global_pc):
 
                 # CASCADE
-                # if the destination of our read is another chip
+                # if the destination of our read is a port leading to another chip
                 # then we write the value this cycle
-                if destination in [LEFT, UP, RIGHT, DOWN]:
+                # TODO handle ANY/LAST
+                if destination in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     self.write_state(destination, value)
-                    return
+                    # read value from one port, but now writing to another port
+                    # so the read has not succeeded
+                    return False
 
                 # if destination is nil or a register, we go back into a run state next cycle
                 if destination == ACC_ADD:
@@ -160,41 +184,68 @@ class AssemblyChip:
                     self.set_acc(value)
                 elif destination == NIL:
                     pass
-                self.run_state()
+                # We fulfilled the read we were working on, yay!
+                return True
+        return False
 
     def try_write(self):
         assert(self.state == WRITE)
         (cycle, direction, value) = self.buffer
         other = self.get_neighbor(direction)
+
+        debug('{} try_write cycle={} direction={} value={}'.format(self.name, cycle, direction, value))
+        debug('{} other.buffer {} = {}'.format(self.name, other.state, other.buffer))
+
         if other.state == READ:
             # try to fulfill the read from the other side
             # this is because reads can cascade, while writes cannot
             # i.e. the destination of a read could be acc, or a port
             # while a write just needs a read on the other side to work
-            other.try_read()
+            return other.try_read()
+        # not able to fulfill a write yet
+        return False
 
     def run_many(self, num):
         for i in range(num):
             self.run()
 
     def run(self):
-        if self.state == READ:
+        if self.state == PASS:
+            pass
+        elif self.state == READ:
             # try to fulfill the read
-            self.try_read()
+            debug('{} trying to fulfill a read'.format(self.name))
+            result = self.try_read()
+            if result:
+                # TODO should pcinc() be part of run_state() method?
+                debug('{} fulfilled read'.format(self.name))
+                self.run_state()
+                self.pcinc()
+            else:
+                debug('{} unable to fulfill read'.format(self.name))
         elif self.state == WRITE:
             # try to fulfill a write
-            self.try_write()
+            debug('{} trying to fulfill a write'.format(self.name))
+            result = self.try_write()
+            if result:
+                # TODO should pcinc() be part of run_state() method?
+                debug('{} fulfilled write'.format(self.name))
+                self.run_state()
+                self.pcinc()
+            else:
+                debug('{} unable to fulfill write'.format(self.name))
+
         elif self.state == RUN:
             if not self.instructions:
                 return
             instruction = self.instructions[self.pc].replace(',', '')
             parts = instruction.split()
             opcode = parts.pop(0)
-            debug('opcode is {}'.format(opcode))
+            trace('opcode is {}'.format(opcode))
             # TODO: assert rest of line is empty after we've processed an instruction
             # maybe split into jumps and not jumps?
             if opcode == NOP or (opcode == ADD and parts[0] == NIL):
-                # two kinds of nop
+                # simplest two kinds of nop
                 pass
             elif opcode == MOV:
                 src = parts.pop(0)
@@ -234,22 +285,22 @@ class AssemblyChip:
                 val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
                     # read from one of our ports and add to acc register
-                    debug('instruction "{}" adding from {} to acc'.format(instruction, val))
+                    trace('instruction "{}" adding from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_ADD)
                 elif is_number(val):
                     val = int(val)
-                    debug('add instruction, val is {}'.format(val))
+                    trace('add instruction, val is {}'.format(val))
                     self.add(val)
                 else:
                     raise Exception('illegal instruction: "{}"'.format(instruction))
             elif opcode == SUB:
                 val = parts.pop(0)
                 if val in [LEFT, UP, RIGHT, DOWN, ANY, LAST]:
-                    debug('instruction "{}" subtracting from {} to acc'.format(instruction, val))
+                    trace('instruction "{}" subtracting from {} to acc'.format(instruction, val))
                     self.read_state(val, ACC_SUB)
                 elif is_number(val):
                     val = int(val)
-                    debug('sub instruction, val is {}'.format(val))
+                    trace('sub instruction, val is {}'.format(val))
                     self.sub(val)
                 else:
                     raise Exception('illegal instruction: "{}"'.format(instruction))
@@ -302,6 +353,7 @@ class AssemblyChip:
                 self.pcinc()
 
     def pcinc(self):
+        debug('{} incrementing from {}'.format(self.name, self.pc))
         self.pc += 1
         self.pc %= len(self.instructions)
         # TODO: while not_empty(self.instruction[self.pc])
@@ -309,6 +361,7 @@ class AssemblyChip:
         while self.instructions[self.pc].strip() == '':
             self.pc += 1
             self.pc %= len(self.instructions)
+        debug('{} just incremented to {}'.format(self.name, self.pc))
 
     def bounds_check(self):
         if self.acc > 999:
@@ -360,7 +413,7 @@ class AssemblyChip:
         # use a helper to return just the array
         # and use .join('\n') for the actual __str__ method
         res = self.str_instructions()
-        return '\n'.join(res)
+        return self.name + '\n' + '\n'.join(res)
 
 
 if __name__ == '__main__':
