@@ -444,7 +444,8 @@ class AssemblyChip:
         # use a helper to return just the array
         # and use .join('\n') for the actual __str__ method
         res = self.str_instructions()
-        return self.name + '\n' + '\n'.join(res)
+        return '{} / {} / {}\n'.format(self.name, self.cycle, AssemblyChip.global_pc) + \
+            '\n'.join(res)
 
 
 if __name__ == '__main__':
