@@ -3,7 +3,11 @@ from assembly import AssemblyChip, READ, WRITE, RUN, global_inc
 
 '''
 TODO:
-* jump instructions
+* jmp to label with label on the same line
+* jez
+* jnz
+* jgz
+* jlz
 * bounds checks for add/subtract/move with acc
 * move constant values to a port / receive constants from port to acc
 '''
@@ -13,7 +17,7 @@ DEBUG = True
 
 def debug(msg):
     if DEBUG:
-        print(msg)
+        print(str(msg))
 
 
 def parse(program):
@@ -38,9 +42,9 @@ class SimpleTestCase(unittest.TestCase):
         '''))
         # run 2 instructions
         chip.run_many(2)
-        assert chip.acc == 1, 'chip.acc expected 1, actual {}\n{}'.format(chip.acc, chip)
-        assert chip.bak == 1, 'chip.bak expected 1, actual {}\n{}'.format(chip.bak, chip)
-        assert chip.pc == 0, 'chip.pc expected 0, actual {}\n{}'.format(chip.pc, chip)
+        self.assertTrue(chip.acc == 1, 'chip.acc expected 1, actual {}\n{}'.format(chip.acc, chip))
+        self.assertTrue(chip.bak == 1, 'chip.bak expected 1, actual {}\n{}'.format(chip.bak, chip))
+        self.assertTrue(chip.pc == 0, 'chip.pc expected 0, actual {}\n{}'.format(chip.pc, chip))
 
     def testAdd2(self):
         chip = AssemblyChip(parse('''
@@ -236,20 +240,254 @@ class SimpleTestCase(unittest.TestCase):
         self.assertTrue(chip1.pc == 0)
         self.assertTrue(chip2.pc == 0)
 
+    def testJmp(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+        jmp label
+        add 10
+        label:
+        add 5
+        '''))
 
-'''
-Cases to consider:
-* chip1 writes to chip2, chip1.run() < chip2.run()
-    - chip1 triggers a read for chip2
-    - what state should we put chip2 into? what happens when chip2.run() gets called?
-        > suppose it's RUN; what do we do?
-        > suppose it's PASS; what do we do?
-* chip1 writes to chip2, chip1.run() > chip2.run()
-    - chip2.run() reads, and finishes the read; what state do we put chip1 into?
-    - OK
-* chip1 reads from chip2, chip1.run() < chip2.run()
-* chip1 reads from chip2, chip1.run() > chip2.run()
-'''
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 5)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 2)
+
+    def testJmpLabelSameLine(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+        jmp label
+        add 10
+        label: add 5
+        '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 5)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 2)
+
+    def testJmpLabelSameLineSpaces(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+        jmp label
+        add 10
+        label: add 5
+        
+        
+        '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 5)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 2)
+
+    def testJez(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            jez label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 5)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 2)
+
+    def testJez2(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            add 10
+            jez label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertEquals(110, chip1.acc)
+        self.assertTrue(chip1.pc == 3)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJnz(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            add 10
+            jnz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 15)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJnz2(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            jnz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 105)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJgz(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            add 10
+            jgz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 15)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJgz2(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            jgz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 105)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJlz(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            sub 10
+            jlz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == -5)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJlz2(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            jlz label
+            add 100
+            label: add 5
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertTrue(chip1.acc == 105)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
+
+    def testJro(self):
+        # test jumping to a label
+        chip1 = AssemblyChip(parse('''
+            add 3
+            jro acc
+            add 100
+            add 200
+            add 300
+            '''))
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        chip1.run()
+        debug(chip1)
+
+        self.assertEquals(303, chip1.acc)
+        self.assertTrue(chip1.pc == 0)
+        self.assertTrue(chip1.cycle == 3)
 
 
 def run_all():
@@ -257,15 +495,23 @@ def run_all():
 
 
 def run_some():
-    # @unittest.skipUnless(name == 'testWriteNumReadNumAcc')
-    # unittest.test_chip.SimpleTestCase.testWriteNumReadNumAcc()
-    # pass
-
-    # tests = unittest.TestLoader().loadTestsFromName('tests.' + 'testWriteNumReadNumAcc')
-    # unittest.TextTestRunner(verbosity=2).run(tests)
     t = SimpleTestCase()
+    '''
     t.testReadWriteTwice()
-    # t.testWrapAround3()
+    t.testWrapAround3()
+    t.testJmp()
+    t.testJmpLabelSameLine()
+    t.testJmpLabelSameLineSpaces()
+    t.testJez()
+    t.testJez2()
+    t.testJnz()
+    t.testJnz2()
+    t.testJgz()
+    t.testJgz2()
+    t.testJlz()
+    t.testJlz2()
+    '''
+    t.testJro()
 
 
 if __name__ == '__main__':

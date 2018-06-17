@@ -101,22 +101,27 @@ class AssemblyChip:
         self.instructions = []
         for line in program.splitlines():
             # TODO limit instructions to 20 chars in length
-            # remove comments
-            # TODO: keep comments, but skip in pcinc() method
             i = line.find('#')
             if i >= 0:
                 line = line[:i]
             # find labels
             if ':' in line:
-                label, line = line.split(':')
+                label, _ = line.split(':')
                 label = label.strip()
                 self.labels[label] = len(self.instructions)
             line = line.strip()
             self.instructions.append(line)
 
-    def check_label(self, label):
+    def get_instruction(self):
+        instruction = self.instructions[self.pc]
+        instruction = re.sub(r'(.*:)|(#.*)', '', instruction).strip()
+        return instruction
+
+    def jump_to_label(self, label):
         if label not in self.labels:
             raise Exception('unknown label {} at line {}'.format(label, self.pc))
+        self.pc = self.labels[label]
+        self.next_valid_instruction()
 
     def get_neighbor(self, direction):
         if direction == UP:
@@ -212,23 +217,6 @@ class AssemblyChip:
                 return True
         return False
 
-    # def try_write(self):
-    #     assert(self.state == WRITE)
-    #     (cycle, direction, value) = self.buffer
-    #     other = self.get_neighbor(direction)
-    #
-    #     debug('{} try_write cycle={} direction={} value={}'.format(self.name, cycle, direction, value))
-    #     debug('{} other.buffer {} = {}'.format(self.name, other.state, other.buffer))
-    #
-    #     if other.state == READ:
-    #         # try to fulfill the read from the other side
-    #         # this is because reads can cascade, while writes cannot
-    #         # i.e. the destination of a read could be acc, or a port
-    #         # while a write just needs a read on the other side to work
-    #         return other.try_read()
-    #     # not able to fulfill a write yet
-    #     return False
-
     def run_many(self, num):
         for i in range(num):
             self.run()
@@ -252,24 +240,10 @@ class AssemblyChip:
             else:
                 debug('{} unable to fulfill read'.format(self.name))
         elif self.state == WRITE:
-            # writes are skipped. All writes are fulfilled by reads.
+            # writes are skipped. All writes are fulfilled by the read from the other node
             pass
-
-            # try to fulfill a write
-            # debug('{} trying to fulfill a write'.format(self.name))
-            # result = self.try_write()
-            # if result:
-            #     # TODO should pcinc() be part of run_state() method?
-            #     debug('{} fulfilled write'.format(self.name))
-            #     self.run_state()
-            #     self.pcinc()
-            # else:
-            #     debug('{} unable to fulfill write'.format(self.name))
-
         elif self.state == RUN:
-            if not self.instructions:
-                return
-            instruction = self.instructions[self.pc].replace(',', '')
+            instruction = self.get_instruction()
             parts = instruction.split()
             opcode = parts.pop(0)
             trace('opcode is {}'.format(opcode))
@@ -341,58 +315,68 @@ class AssemblyChip:
                 self.bak = self.acc
             elif opcode == SWP:
                 self.acc, self.bak = self.bak, self.acc
-            elif opcode == JMP:
-                label = parts.pop(0)
-                self.check_label(label)
-                # HACK: we will increment PC after the if block
-                self.pc = self.labels[label] - 1
-            elif opcode == JEZ:
-                label = parts.pop(0)
-                self.check_label(label)
-                if self.acc == 0:
-                    # HACK: we will increment PC after the if block
-                    self.pc = self.labels[label] - 1
-            elif opcode == JNZ:
-                label = parts.pop(0)
-                self.check_label(label)
-                if self.acc != 0:
-                    # HACK: we will increment PC after the if block
-                    self.pc = self.labels[label] - 1
-            elif opcode == JGZ:
-                label = parts.pop(0)
-                self.check_label(label)
-                if self.acc > 0:
-                    # HACK: we will increment PC after the if block
-                    self.pc = self.labels[label] - 1
-            elif opcode == JLZ:
-                label = parts.pop(0)
-                self.check_label(label)
-                if self.acc < 0:
-                    # HACK: we will increment PC after the if block
-                    self.pc = self.labels[label] - 1
-            elif opcode == JRO:
-                offset = int(parts.pop(0))
-                # HACK: we will increment PC after the if block
-                # TODO: handle wrap-around
-                self.pc += offset - 1
+            elif opcode in [JMP, JEZ, JNZ, JGZ, JLZ, JRO]:
+                # jump instruction
+                branch_taken = False
+                if opcode == JMP:
+                    label = parts.pop(0)
+                    self.jump_to_label(label)
+                    branch_taken = True
+                elif opcode == JEZ:
+                    label = parts.pop(0)
+                    if self.acc == 0:
+                        self.jump_to_label(label)
+                        branch_taken = True
+                elif opcode == JNZ:
+                    label = parts.pop(0)
+                    if self.acc != 0:
+                        self.jump_to_label(label)
+                        branch_taken = True
+                elif opcode == JGZ:
+                    label = parts.pop(0)
+                    if self.acc > 0:
+                        self.jump_to_label(label)
+                        branch_taken = True
+                elif opcode == JLZ:
+                    label = parts.pop(0)
+                    if self.acc < 0:
+                        self.jump_to_label(label)
+                        branch_taken = True
+                elif opcode == JRO:
+                    src = parts.pop(0)
+                    if is_number(src):
+                        offset = int(src)
+                    elif src == ACC:
+                        offset = self.acc
+                    else:
+                        raise Exception('{} illegal src for jro {}'.format(self.name, src))
+                    self.pc += offset
+                    self.next_valid_instruction()
+                    branch_taken = True
+
+                if not branch_taken:
+                    self.pcinc()
             else:
                 raise Exception('unknown opcode at line {} for instruction "{}'.format(self.pc, instruction))
+
             # increment program counter so long as:
             # we are in the RUN state
-            # we did not just execute a jump instruction
+            # we did not just execute a jump instruction (jump instructions either increment or not on their own)
             if self.state == RUN and opcode not in [JMP, JNZ, JEZ, JGZ, JLZ, JRO]:
                 self.pcinc()
 
-    def pcinc(self):
-        debug('incrementing pc for {} to {}'.format(self.name, self.pc))
-        self.pc += 1
-        self.pc %= len(self.instructions)
-        # TODO: while not_empty(self.instruction[self.pc])
-        # in order to skip over comments and blank lines in the code
-        while self.instructions[self.pc].strip() == '':
+    def next_valid_instruction(self):
+        # keep incrementing program counter (pc) past blank lines and labels
+        while re.sub(r'.*:', '', self.instructions[self.pc]).strip() == '':
             self.pc += 1
             self.pc %= len(self.instructions)
-        debug('{} just incremented to {}'.format(self.name, self.pc))
+
+    def pcinc(self):
+        trace('incrementing pc for {} to {}'.format(self.name, self.pc))
+        self.pc += 1
+        self.pc %= len(self.instructions)
+        self.next_valid_instruction()
+        trace('{} just incremented to {}'.format(self.name, self.pc))
 
     def bounds_check(self):
         if self.acc > 999:
