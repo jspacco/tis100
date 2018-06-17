@@ -3,13 +3,9 @@ from assembly import AssemblyChip, READ, WRITE, RUN, global_inc
 
 '''
 TODO:
-* jmp to label with label on the same line
-* jez
-* jnz
-* jgz
-* jlz
-* bounds checks for add/subtract/move with acc
-* move constant values to a port / receive constants from port to acc
+* test bounds checks for add/subtract/move with acc
+* test multiple cascading MOV ops
+* test remaining ops (
 '''
 
 DEBUG = True
@@ -79,17 +75,17 @@ class SimpleTestCase(unittest.TestCase):
         '''))
         chip.run()
         chip.run()
-        self.assertTrue(chip.acc == 1)
-        self.assertTrue(chip.bak == 1)
-        self.assertTrue(chip.pc == 2)
+        self.assertEquals(1, chip.acc)
+        self.assertEquals(1, chip.bak)
+        self.assertEquals(2, chip.pc)
         chip.run()
-        self.assertTrue(chip.acc == 4)
-        self.assertTrue(chip.bak == 1)
-        self.assertTrue(chip.pc == 3)
+        self.assertEquals(4, chip.acc)
+        self.assertEquals(1, chip.bak)
+        self.assertEquals(3, chip.pc)
         chip.run()
-        self.assertTrue(chip.acc == 1)
-        self.assertTrue(chip.bak == 4)
-        self.assertTrue(chip.pc == 0)
+        self.assertEquals(1, chip.acc)
+        self.assertEquals(4, chip.bak)
+        self.assertEquals(0, chip.pc)
 
     def testNeg(self):
         chip = AssemblyChip(parse('''
